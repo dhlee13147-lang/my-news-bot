@@ -2,7 +2,7 @@ name: News Bot
 
 on:
   schedule:
-    - cron: '0 * * * *' # 매 정각마다 자동으로 실행 (1시간 주기)
+    - cron: '*/10 * * * *' # 매 정각마다 자동으로 실행 (10분 주기)
   workflow_dispatch: # 내가 원할 때 수동으로 실행하는 버튼 생성
 
 jobs:
