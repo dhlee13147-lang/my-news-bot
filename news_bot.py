@@ -22,10 +22,9 @@ client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 bot = telegram.Bot(token=TELEGRAM_TOKEN)
 csv_file = 'sent_news.csv'
 
+# 원본 리스트 고정
 companies = ["더즌", "dozn", "카카오뱅크", "카카오페이", "오픈에셋", "스위치원"]
 exceptionalWords = ['랭키파이', '보호자', '브랜드평판', '브랜드 평판', '트렌드지수', '트렌드 지수', '링크드인']
-# 제외 사이트 목록에 press 링크 유형 추가
-exceptionalSites = ['n.news.naver.com', 'www.pinpointnews.co.kr', 'www.pointdaily.co.kr', 'cwn.kr', 'www.stardailynews.co.kr', 'www.raonnews.com', '/press/']
 
 def load_sent_articles():
     if not os.path.exists(csv_file): return set()
@@ -56,11 +55,11 @@ async def get_summary(title, content):
     if not client: return "API 키 미설정"
     await asyncio.sleep(6) 
     try:
-        prompt = f"다음 뉴스 기사 본문을 읽고 3줄로 요약해줘.\n제목: {title}\n본문: {content}"
+        prompt = f"다음 뉴스 기사 본문을 읽고 3줄 요약해줘.\n제목: {title}\n본문: {content}"
         response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
         return response.text.strip()
     except Exception as e:
-        log(f"⚠️ 요약 중 오류 발생: {e}")
+        log(f"⚠️ 요약 오류: {e}")
         return "요약 생성 실패"
 
 def create_driver():
@@ -73,7 +72,7 @@ def create_driver():
     return webdriver.Chrome(service=service, options=options)
 
 async def news_release():
-    log("🚀 뉴스 봇 작동 시작")
+    log("🚀 뉴스 봇 작동 시작 (구조 기반 정밀 검색)")
     sent_urls = load_sent_articles()
     driver = create_driver()
 
@@ -84,23 +83,18 @@ async def news_release():
         time.sleep(3) 
 
         soup = BeautifulSoup(driver.page_source, 'html.parser')
-        news_anchors = soup.select('a:has(span.sds-comps-text)')
-        log(f"📈 발견된 링크 개수: {len(news_anchors)}")
 
-        for anchor in news_anchors[:3]:
+        # ✅ [핵심 변경] data-heatmap-target이 ".tit"인 <a> 태그만 정확히 타격
+        # 그리고 그 안에 span.sds-comps-text가 있는 경우만 긁어옵니다.
+        news_anchors = soup.select('a[data-heatmap-target=".tit"]:has(span.sds-comps-text)')
+        log(f"📈 정밀 검색된 뉴스 개수: {len(news_anchors)}")
+
+        for anchor in news_anchors[:2]:
             title_tag = anchor.select_one('span.sds-comps-text')
             title = title_tag.get_text(strip=True) if title_tag else ''
             url = anchor.get('href', '').strip()
 
-            # 1. 기본적인 유효성 검사
             if not title or not url or url in sent_urls: continue
-            
-            # 2. [핵심] 언론사 홈 링크(/press/) 및 제외 사이트 필터링
-            if any(site in url for site in exceptionalSites):
-                log(f"⏭️ 기사가 아닌 링크 제외: {url}")
-                continue
-                
-            # 3. 예외 단어 필터링
             if any(word in title for word in exceptionalWords): continue
 
             log(f"✨ 새 뉴스 발견: {title}")
