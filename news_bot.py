@@ -89,7 +89,7 @@ async def news_release():
         news_anchors = soup.select('a[data-heatmap-target=".tit"]:has(span.sds-comps-text)')
         log(f"📈 정밀 검색된 뉴스 개수: {len(news_anchors)}")
 
-        for anchor in news_anchors[:2]:
+        for anchor in news_anchors[:10]:
             title_tag = anchor.select_one('span.sds-comps-text')
             title = title_tag.get_text(strip=True) if title_tag else ''
             url = anchor.get('href', '').strip()
