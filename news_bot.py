@@ -22,14 +22,9 @@ client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 bot = telegram.Bot(token=TELEGRAM_TOKEN)
 csv_file = 'sent_news.csv'
 
+# 원본 리스트 고정
 companies = ["더즌", "dozn", "카카오뱅크", "카카오페이", "오픈에셋", "스위치원"]
 exceptionalWords = ['랭키파이', '보호자', '브랜드평판', '브랜드 평판', '트렌드지수', '트렌드 지수', '링크드인']
-
-# ✅ 24시간 이내인지 확인하는 함수
-def is_within_24h(time_text):
-    if any(keyword in time_text for keyword in ['분 전', '시간 전', '방금 전', '1일 전']):
-        return True
-    return False
 
 def load_sent_articles():
     if not os.path.exists(csv_file): return set()
@@ -57,14 +52,14 @@ def get_article_content(driver, url):
     except: return ""
 
 async def get_summary(title, content):
-    if not client: return "AI 요약 기능을 사용할 수 없습니다."
-    await asyncio.sleep(6) # 할당량 보호
+    if not client: return "API 키 미설정"
+    await asyncio.sleep(6) 
     try:
-        prompt = f"다음 뉴스 기사 본문을 읽고 3줄로 요약해줘.\n제목: {title}\n본문: {content}"
+        prompt = f"다음 뉴스 기사 본문을 읽고 3줄 요약해줘.\n제목: {title}\n본문: {content}"
         response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
         return response.text.strip()
     except Exception as e:
-        log(f"⚠️ 요약 에러: {e}")
+        log(f"⚠️ 요약 오류: {e}")
         return "요약 생성 실패"
 
 def create_driver():
@@ -77,50 +72,36 @@ def create_driver():
     return webdriver.Chrome(service=service, options=options)
 
 async def news_release():
-    log("🚀 24시간 정밀 모니터링 봇 작동 시작")
+    log("🚀 뉴스 봇 작동 시작 (구조 기반 정밀 검색)")
     sent_urls = load_sent_articles()
     driver = create_driver()
 
     for company in companies:
-        log(f"🔍 {company} 검색 중...")
-        search_url = f'https://search.naver.com/search.naver?where=news&query="{company}"&sm=tab_opt&sort=1'
+        log(f"🔍 검색 키워드: {company}")
+        search_url = f'https://search.naver.com/search.naver?where=news&query="{company}"&sm=tab_opt&sort=1&nso=so%3Add%2Cp%3A1d'
         driver.get(search_url)
         time.sleep(3) 
 
         soup = BeautifulSoup(driver.page_source, 'html.parser')
-        
-        # 기사 정보가 담긴 구역들을 먼저 찾습니다.
-        # 네이버 SDS는 보통 하나의 기사가 li.bx 또는 특정 div에 묶여 있습니다.
-        news_items = soup.select('div.news_contents') or soup.select('li.bx')
 
-        for item in news_items:
-            # 1. 제목과 URL 추출 (data-heatmap-target 사용)
-            anchor = item.select_one('a[data-heatmap-target=".tit"]')
-            if not anchor: continue
-            
+        # ✅ [핵심 변경] data-heatmap-target이 ".tit"인 <a> 태그만 정확히 타격
+        # 그리고 그 안에 span.sds-comps-text가 있는 경우만 긁어옵니다.
+        news_anchors = soup.select('a[data-heatmap-target=".tit"]:has(span.sds-comps-text)')
+        log(f"📈 정밀 검색된 뉴스 개수: {len(news_anchors)}")
+
+        for anchor in news_anchors[:2]:
             title_tag = anchor.select_one('span.sds-comps-text')
             title = title_tag.get_text(strip=True) if title_tag else ''
             url = anchor.get('href', '').strip()
 
-            # 2. [핵심] 시간 정보 추출 (사용자 제공 코드 기반)
-            # span 태그 중 특정 클래스명을 가진 요소를 찾습니다.
-            time_tag = item.select_one('span.sds-comps-text-type-body2')
-            time_info = time_tag.get_text(strip=True) if time_tag else "정보 없음"
-
-            # ✅ 검사 프로세스
             if not title or not url or url in sent_urls: continue
-            
-            # 24시간 필터 적용
-            if not is_within_24h(time_info):
-                continue
-
             if any(word in title for word in exceptionalWords): continue
 
-            log(f"✨ 새 뉴스 발견! ({time_info}): {title}")
+            log(f"✨ 새 뉴스 발견: {title}")
             content = get_article_content(driver, url)
             summary = await get_summary(title, content)
             
-            message = f"📢 [{company}]\n📌 {title}\n⏱️ 발행: {time_info}\n\n🤖 AI 요약:\n{summary}\n\n🔗 {url}"
+            message = f"📢 [{company}]\n📌 {title}\n\n🤖 AI 요약:\n{summary}\n\n🔗 {url}"
             try:
                 await bot.send_message(chat_id=CHAT_ID, text=message)
                 save_sent_article(url, title)
