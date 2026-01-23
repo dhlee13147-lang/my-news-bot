@@ -2,8 +2,8 @@ name: News Bot
 
 on:
   schedule:
-    - cron: '*/10 * * * *' # 매 정각마다 자동으로 실행 (10분 주기)
-  workflow_dispatch: # 내가 원할 때 수동으로 실행하는 버튼 생성
+    - cron: '*/10 * * * *' # 10분 주기
+  workflow_dispatch:
 
 jobs:
   run-bot:
@@ -20,6 +20,8 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PYTHONUNBUFFERED: "1" # ⬅️ 이 줄이 로그를 즉시 보여주게 합니다!
         run: python news_bot.py
       - name: Save history
         run: |
