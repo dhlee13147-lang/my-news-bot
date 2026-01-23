@@ -1,0 +1,30 @@
+name: News Bot
+
+on:
+  schedule:
+    - cron: '0 * * * *' # 매 정각마다 자동으로 실행 (1시간 주기)
+  workflow_dispatch: # 내가 원할 때 수동으로 실행하는 버튼 생성
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install tools
+        run: pip install -r requirements.txt
+      - name: Start Bot
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python news_bot.py
+      - name: Save history
+        run: |
+          git config --global user.name "bot"
+          git config --global user.email "bot@github.com"
+          git add sent_news.csv
+          git commit -m "Update news list" || exit 0
+          git push
