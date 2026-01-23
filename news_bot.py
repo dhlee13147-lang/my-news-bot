@@ -2,7 +2,6 @@ import asyncio
 import os
 import csv
 import time
-from datetime import datetime
 import telegram
 from google import genai
 from selenium import webdriver
@@ -28,11 +27,7 @@ exceptionalWords = ['랭키파이', '보호자', '브랜드평판', '브랜드 �
 
 # ✅ 24시간 이내인지 확인하는 함수
 def is_within_24h(time_text):
-    # '분 전', '시간 전', '방금 전'은 모두 24시간 이내임
-    if '분 전' in time_text or '시간 전' in time_text or '방금' in time_text:
-        return True
-    # '1일 전'까지는 약 24시간으로 간주하여 포함 (취향에 따라 제외 가능)
-    if '1일 전' in time_text:
+    if any(keyword in time_text for keyword in ['분 전', '시간 전', '방금 전', '1일 전']):
         return True
     return False
 
@@ -62,10 +57,10 @@ def get_article_content(driver, url):
     except: return ""
 
 async def get_summary(title, content):
-    if not client: return "API 키 미설정"
-    await asyncio.sleep(6) # 2.5-flash 비율 제한 방지
+    if not client: return "AI 요약 기능을 사용할 수 없습니다."
+    await asyncio.sleep(6) # 할당량 보호
     try:
-        prompt = f"다음 뉴스 기사 본문을 읽고 요약해줘. \n형식: 3줄 리스트로 이모지 사용\n제목: {title}\n본문: {content}"
+        prompt = f"다음 뉴스 기사 본문을 읽고 3줄로 요약해줘.\n제목: {title}\n본문: {content}"
         response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
         return response.text.strip()
     except Exception as e:
@@ -82,7 +77,7 @@ def create_driver():
     return webdriver.Chrome(service=service, options=options)
 
 async def news_release():
-    log("🚀 24시간 모니터링 봇 작동 시작")
+    log("🚀 24시간 정밀 모니터링 봇 작동 시작")
     sent_urls = load_sent_articles()
     driver = create_driver()
 
@@ -94,36 +89,34 @@ async def news_release():
 
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         
-        # 기사 하나하나가 담긴 덩어리(area)를 먼저 찾습니다.
-        news_areas = soup.select('div.news_area')
-        log(f"📈 검색된 총 기사 개수: {len(news_areas)}")
+        # 기사 정보가 담긴 구역들을 먼저 찾습니다.
+        # 네이버 SDS는 보통 하나의 기사가 li.bx 또는 특정 div에 묶여 있습니다.
+        news_items = soup.select('div.news_contents') or soup.select('li.bx')
 
-        for area in news_areas:
-            # 1. 기사 제목과 링크 추출 (제안하신 정밀 타격 방식)
-            anchor = area.select_one('a[data-heatmap-target=".tit"]')
+        for item in news_items:
+            # 1. 제목과 URL 추출 (data-heatmap-target 사용)
+            anchor = item.select_one('a[data-heatmap-target=".tit"]')
             if not anchor: continue
             
             title_tag = anchor.select_one('span.sds-comps-text')
             title = title_tag.get_text(strip=True) if title_tag else ''
             url = anchor.get('href', '').strip()
 
-            # 2. 시간 정보 추출
-            # 네이버 SDS 디자인에서 시간은 보통 span.info 또는 div.news_info 안에 있습니다.
-            time_tag = area.select_one('span.info') 
-            # (만약 span.info가 여러개면 보통 두 번째가 시간입니다)
-            time_info = area.select('span.info')[-1].get_text() if area.select('span.info') else "알 수 없음"
+            # 2. [핵심] 시간 정보 추출 (사용자 제공 코드 기반)
+            # span 태그 중 특정 클래스명을 가진 요소를 찾습니다.
+            time_tag = item.select_one('span.sds-comps-text-type-body2')
+            time_info = time_tag.get_text(strip=True) if time_tag else "정보 없음"
 
-            # ✅ 검사 시작
+            # ✅ 검사 프로세스
             if not title or not url or url in sent_urls: continue
             
             # 24시간 필터 적용
             if not is_within_24h(time_info):
-                log(f"⏭️ 24시간 지난 기사 패스 ({time_info}): {title}")
                 continue
 
             if any(word in title for word in exceptionalWords): continue
 
-            log(f"✨ 24시간 내 새 뉴스 발견! ({time_info}): {title}")
+            log(f"✨ 새 뉴스 발견! ({time_info}): {title}")
             content = get_article_content(driver, url)
             summary = await get_summary(title, content)
             
