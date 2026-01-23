@@ -2,6 +2,7 @@ import asyncio
 import os
 import csv
 import time
+from datetime import datetime
 import telegram
 from google import genai
 from selenium import webdriver
@@ -22,9 +23,18 @@ client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 bot = telegram.Bot(token=TELEGRAM_TOKEN)
 csv_file = 'sent_news.csv'
 
-# 원본 리스트 고정
 companies = ["더즌", "dozn", "카카오뱅크", "카카오페이", "오픈에셋", "스위치원"]
 exceptionalWords = ['랭키파이', '보호자', '브랜드평판', '브랜드 평판', '트렌드지수', '트렌드 지수', '링크드인']
+
+# ✅ 24시간 이내인지 확인하는 함수
+def is_within_24h(time_text):
+    # '분 전', '시간 전', '방금 전'은 모두 24시간 이내임
+    if '분 전' in time_text or '시간 전' in time_text or '방금' in time_text:
+        return True
+    # '1일 전'까지는 약 24시간으로 간주하여 포함 (취향에 따라 제외 가능)
+    if '1일 전' in time_text:
+        return True
+    return False
 
 def load_sent_articles():
     if not os.path.exists(csv_file): return set()
@@ -53,13 +63,13 @@ def get_article_content(driver, url):
 
 async def get_summary(title, content):
     if not client: return "API 키 미설정"
-    await asyncio.sleep(6) 
+    await asyncio.sleep(6) # 2.5-flash 비율 제한 방지
     try:
-        prompt = f"다음 뉴스 기사 본문을 읽고 3줄 요약해줘.\n제목: {title}\n본문: {content}"
+        prompt = f"다음 뉴스 기사 본문을 읽고 요약해줘. \n형식: 3줄 리스트로 이모지 사용\n제목: {title}\n본문: {content}"
         response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
         return response.text.strip()
     except Exception as e:
-        log(f"⚠️ 요약 오류: {e}")
+        log(f"⚠️ 요약 에러: {e}")
         return "요약 생성 실패"
 
 def create_driver():
@@ -72,36 +82,52 @@ def create_driver():
     return webdriver.Chrome(service=service, options=options)
 
 async def news_release():
-    log("🚀 뉴스 봇 작동 시작 (구조 기반 정밀 검색)")
+    log("🚀 24시간 모니터링 봇 작동 시작")
     sent_urls = load_sent_articles()
     driver = create_driver()
 
     for company in companies:
-        log(f"🔍 검색 키워드: {company}")
+        log(f"🔍 {company} 검색 중...")
         search_url = f'https://search.naver.com/search.naver?where=news&query="{company}"&sm=tab_opt&sort=1'
         driver.get(search_url)
         time.sleep(3) 
 
         soup = BeautifulSoup(driver.page_source, 'html.parser')
+        
+        # 기사 하나하나가 담긴 덩어리(area)를 먼저 찾습니다.
+        news_areas = soup.select('div.news_area')
+        log(f"📈 검색된 총 기사 개수: {len(news_areas)}")
 
-        # ✅ [핵심 변경] data-heatmap-target이 ".tit"인 <a> 태그만 정확히 타격
-        # 그리고 그 안에 span.sds-comps-text가 있는 경우만 긁어옵니다.
-        news_anchors = soup.select('a[data-heatmap-target=".tit"]:has(span.sds-comps-text)')
-        log(f"📈 정밀 검색된 뉴스 개수: {len(news_anchors)}")
-
-        for anchor in news_anchors[:2]:
+        for area in news_areas:
+            # 1. 기사 제목과 링크 추출 (제안하신 정밀 타격 방식)
+            anchor = area.select_one('a[data-heatmap-target=".tit"]')
+            if not anchor: continue
+            
             title_tag = anchor.select_one('span.sds-comps-text')
             title = title_tag.get_text(strip=True) if title_tag else ''
             url = anchor.get('href', '').strip()
 
+            # 2. 시간 정보 추출
+            # 네이버 SDS 디자인에서 시간은 보통 span.info 또는 div.news_info 안에 있습니다.
+            time_tag = area.select_one('span.info') 
+            # (만약 span.info가 여러개면 보통 두 번째가 시간입니다)
+            time_info = area.select('span.info')[-1].get_text() if area.select('span.info') else "알 수 없음"
+
+            # ✅ 검사 시작
             if not title or not url or url in sent_urls: continue
+            
+            # 24시간 필터 적용
+            if not is_within_24h(time_info):
+                log(f"⏭️ 24시간 지난 기사 패스 ({time_info}): {title}")
+                continue
+
             if any(word in title for word in exceptionalWords): continue
 
-            log(f"✨ 새 뉴스 발견: {title}")
+            log(f"✨ 24시간 내 새 뉴스 발견! ({time_info}): {title}")
             content = get_article_content(driver, url)
             summary = await get_summary(title, content)
             
-            message = f"📢 [{company}]\n📌 {title}\n\n🤖 AI 요약:\n{summary}\n\n🔗 {url}"
+            message = f"📢 [{company}]\n📌 {title}\n⏱️ 발행: {time_info}\n\n🤖 AI 요약:\n{summary}\n\n🔗 {url}"
             try:
                 await bot.send_message(chat_id=CHAT_ID, text=message)
                 save_sent_article(url, title)
