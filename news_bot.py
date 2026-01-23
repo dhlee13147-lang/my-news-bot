@@ -3,7 +3,7 @@ import os
 import csv
 import time
 import telegram
-import google.generativeai as genai
+from google import genai # 최신 라이브러리로 변경
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -15,63 +15,49 @@ TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CHAT_ID = os.environ.get('CHAT_ID')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
-# Gemini 설정
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash')
-else:
-    model = None
+# Gemini 최신 설정 방식 (2026 기준)
+client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 bot = telegram.Bot(token=TELEGRAM_TOKEN)
 csv_file = 'sent_news.csv'
 
-# ✅ 기사 본문을 추출하는 함수
+# ✅ 본문 추출 함수 (기존과 동일)
 def get_article_content(driver, url):
     try:
         driver.get(url)
-        time.sleep(2) # 페이지 로딩 대기
+        time.sleep(2)
         soup = BeautifulSoup(driver.page_source, 'html.parser')
-        
-        # 일반적인 뉴스 사이트의 본문 태그들을 찾아 텍스트 추출
-        # 기사 본문은 보통 <article>이나 특정 클래스의 <div>에 들어있습니다.
         paragraphs = soup.find_all(['p', 'div'], class_=['article_body', 'art_body', 'news_con', 'article_view'])
-        
-        if not paragraphs:
-            # 특정 클래스가 없을 경우 모든 p 태그 수집
-            paragraphs = soup.find_all('p')
-            
+        if not paragraphs: paragraphs = soup.find_all('p')
         content = " ".join([p.get_text(strip=True) for p in paragraphs])
-        return content[:2000] # 너무 길면 AI가 힘들어하므로 앞부분 2000자만 사용
-    except Exception as e:
-        print(f"본문 추출 중 에러: {url} - {e}")
+        return content[:2000]
+    except:
         return ""
 
-# ✅ 본문을 기반으로 요약하는 함수
+# ✅ AI 요약 함수 (최신 라이브러리 버전)
 async def get_summary(title, content):
-    if not model:
-        return "Gemini API 키가 설정되지 않았습니다."
-    if len(content) < 100:
-        return "본문 내용이 너무 적어 요약할 수 없습니다."
+    if not client: return "API 키 설정 필요"
+    if len(content) < 100: return "본문 내용 부족으로 요약 불가"
     
     try:
-        prompt = f"""
-        너는 뉴스 요약 전문가야. 아래 뉴스 기사의 [본문]을 읽고 내용을 3줄로 요약해줘.
-        형식은 '- '로 시작하는 리스트 형태면 좋겠어.
-        
-        제목: {title}
-        본문: {content}
-        """
-        response = model.generate_content(prompt)
+        prompt = f"다음 뉴스 기사를 3줄 요약해줘.\n제목: {title}\n본문: {content}"
+        # 최신 모델 gemini-2.0-flash 사용
+        response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
         return response.text.strip()
     except Exception as e:
-        print(f"AI 요약 에러: {e}")
-        return "현재 요약을 생성할 수 없습니다."
+        print(f"요약 에러: {e}")
+        return "요약 생성 실패"
 
+# ✅ [중요] IndexError 방지 로직이 추가된 함수
 def load_sent_articles():
     if not os.path.exists(csv_file): return set()
+    sent_set = set()
     with open(csv_file, 'r', encoding='utf-8-sig') as f:
         reader = csv.reader(f)
-        return set(row[0] for row in reader)
+        for row in reader:
+            if row: # 줄에 내용이 있을 때만 읽음 (IndexError 방지)
+                sent_set.add(row[0])
+    return sent_set
 
 def save_sent_article(url, title):
     with open(csv_file, 'a', newline='', encoding='utf-8-sig') as f:
@@ -97,31 +83,23 @@ async def news_release():
         time.sleep(2)
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         
-        # 최신 기사 최대 2개만 처리 (본문까지 읽어야 하므로 개수를 제한합니다)
         for item in soup.select('a.news_tit')[:2]:
             title = item.get_text(strip=True)
             url = item.get('href', '').strip()
 
-            if not title or not url or url in sent_urls:
-                continue
+            if not title or not url or url in sent_urls: continue
             
-            print(f"📄 기사 분석 중: {title}")
-            
-            # 1. 기사 본문 가져오기
             content = get_article_content(driver, url)
-            
-            # 2. AI 요약 실행
             summary = await get_summary(title, content)
             
-            message = f"📢 [{company} 뉴스]\n\n📌 제목: {title}\n\n🤖 AI 본문 요약:\n{summary}\n\n🔗 링크: {url}"
+            message = f"📢 [{company}]\n📌 {title}\n\n🤖 AI 요약:\n{summary}\n\n🔗 {url}"
             
             try:
                 await bot.send_message(chat_id=CHAT_ID, text=message)
                 save_sent_article(url, title)
                 sent_urls.add(url)
                 await asyncio.sleep(2)
-            except Exception as e:
-                print(f"전송 실패: {e}")
+            except: pass
 
     driver.quit()
 
