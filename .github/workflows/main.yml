@@ -1,6 +1,10 @@
 name: News Bot
 
 on:
+# 1. 외부 신호를 받기 위한 설정 추가
+  repository_dispatch:
+    types: [run_news_bot]
+
   schedule:
     - cron: '5,15,25,35,45,55 * * * *'
   push:
