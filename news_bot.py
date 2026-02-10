@@ -3,7 +3,7 @@ import os
 import csv
 import time
 import telegram
-from google import genai
+# from google import genai  # ⬅️ 주석 처리
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -16,9 +16,9 @@ def log(message):
 # ✅ 설정값
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CHAT_ID = os.environ.get('CHAT_ID')
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+# GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY') # ⬅️ 주석 처리
 
-client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+# client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None # ⬅️ 주석 처리
 bot = telegram.Bot(token=TELEGRAM_TOKEN)
 csv_file = 'sent_news.csv'
 
@@ -40,6 +40,8 @@ def save_sent_article(url, title):
         writer = csv.writer(f)
         writer.writerow([url, title])
 
+# ⬅️ 주석 처리
+"""
 def get_article_content(driver, url):
     try:
         driver.get(url)
@@ -50,7 +52,10 @@ def get_article_content(driver, url):
         content = " ".join([p.get_text(strip=True) for p in paragraphs])
         return content[:2500]
     except: return ""
+"""
 
+# ⬅️ 주석 처리
+"""
 async def get_summary(title, content):
     if not client: return "API 키 미설정"
     await asyncio.sleep(6) 
@@ -61,6 +66,7 @@ async def get_summary(title, content):
     except Exception as e:
         log(f"⚠️ 요약 오류: {e}")
         return "요약 생성 실패"
+"""
 
 def create_driver():
     options = Options()
@@ -72,7 +78,7 @@ def create_driver():
     return webdriver.Chrome(service=service, options=options)
 
 async def news_release():
-    log("🚀 뉴스 봇 작동 시작 (구조 기반 정밀 검색)")
+    log("🚀 뉴스 봇 작동 시작 (요약 기능 비활성화)")
     sent_urls = load_sent_articles()
     driver = create_driver()
 
@@ -83,9 +89,6 @@ async def news_release():
         time.sleep(3) 
 
         soup = BeautifulSoup(driver.page_source, 'html.parser')
-
-        # ✅ [핵심 변경] data-heatmap-target이 ".tit"인 <a> 태그만 정확히 타격
-        # 그리고 그 안에 span.sds-comps-text가 있는 경우만 긁어옵니다.
         news_anchors = soup.select('a[data-heatmap-target=".tit"]:has(span.sds-comps-text)')
         log(f"📈 정밀 검색된 뉴스 개수: {len(news_anchors)}")
 
@@ -98,10 +101,16 @@ async def news_release():
             if any(word in title for word in exceptionalWords): continue
 
             log(f"✨ 새 뉴스 발견: {title}")
-            content = get_article_content(driver, url)
-            summary = await get_summary(title, content)
             
-            message = f"📢 [{company}]\n📌 {title}\n\n🤖 AI 요약:\n{summary}\n\n🔗 {url}"
+            # --- 요약 관련 로직 비활성화 시작 ---
+            # content = get_article_content(driver, url)
+            # summary = await get_summary(title, content)
+            # message = f"📢 [{company}]\n📌 {title}\n\n🤖 AI 요약:\n{summary}\n\n🔗 {url}"
+            # --- 요약 관련 로직 비활성화 끝 ---
+
+            # 단순한 메시지 포맷으로 변경
+            message = f"📢 [{company}]\n📌 {title}\n\n🔗 {url}"
+            
             try:
                 await bot.send_message(chat_id=CHAT_ID, text=message)
                 save_sent_article(url, title)
