@@ -3,7 +3,7 @@ import os
 import csv
 import time
 import telegram
-# from google import genai  # ⬅️ 주석 처리
+from datetime import datetime  # 날짜 처리를 위해 추가
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -16,13 +16,10 @@ def log(message):
 # ✅ 설정값
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CHAT_ID = os.environ.get('CHAT_ID')
-# GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY') # ⬅️ 주석 처리
 
-# client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None # ⬅️ 주석 처리
 bot = telegram.Bot(token=TELEGRAM_TOKEN)
 csv_file = 'sent_news.csv'
 
-# 원본 리스트 고정
 companies = ["더즌", "dozn", "카카오페이", "오픈에셋", "스위치원"]
 exceptionalWords = ['랭키파이', '보호자', '브랜드평판', '브랜드 평판', '트렌드지수', '트렌드 지수', '링크드인']
 
@@ -32,41 +29,15 @@ def load_sent_articles():
     with open(csv_file, 'r', encoding='utf-8-sig') as f:
         reader = csv.reader(f)
         for row in reader:
+            # 첫 번째 열(URL)을 기준으로 중복 체크
             if row: sent_set.add(row[0])
     return sent_set
 
-def save_sent_article(url, title):
+# 검색 날짜(date_str) 인자를 추가하여 CSV에 저장
+def save_sent_article(url, title, date_str):
     with open(csv_file, 'a', newline='', encoding='utf-8-sig') as f:
         writer = csv.writer(f)
-        writer.writerow([url, title])
-
-# ⬅️ 주석 처리
-"""
-def get_article_content(driver, url):
-    try:
-        driver.get(url)
-        time.sleep(2)
-        soup = BeautifulSoup(driver.page_source, 'html.parser')
-        paragraphs = soup.find_all(['p', 'div'], class_=['article_body', 'news_con', 'article_view'])
-        if not paragraphs: paragraphs = soup.find_all('p')
-        content = " ".join([p.get_text(strip=True) for p in paragraphs])
-        return content[:2500]
-    except: return ""
-"""
-
-# ⬅️ 주석 처리
-"""
-async def get_summary(title, content):
-    if not client: return "API 키 미설정"
-    await asyncio.sleep(6) 
-    try:
-        prompt = f"다음 뉴스 기사 본문을 읽고 3줄 요약해줘.\n제목: {title}\n본문: {content}"
-        response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
-        return response.text.strip()
-    except Exception as e:
-        log(f"⚠️ 요약 오류: {e}")
-        return "요약 생성 실패"
-"""
+        writer.writerow([url, title, date_str])
 
 def create_driver():
     options = Options()
@@ -81,6 +52,9 @@ async def news_release():
     log("🚀 뉴스 봇 작동 시작 (요약 기능 비활성화)")
     sent_urls = load_sent_articles()
     driver = create_driver()
+    
+    # 작업 시점의 날짜 생성 (YYYY-MM-DD 형식)
+    today_str = datetime.now().strftime('%Y-%m-%d')
 
     for company in companies:
         log(f"🔍 검색 키워드: {company}")
@@ -102,18 +76,12 @@ async def news_release():
 
             log(f"✨ 새 뉴스 발견: {title}")
             
-            # --- 요약 관련 로직 비활성화 시작 ---
-            # content = get_article_content(driver, url)
-            # summary = await get_summary(title, content)
-            # message = f"📢 [{company}]\n📌 {title}\n\n🤖 AI 요약:\n{summary}\n\n🔗 {url}"
-            # --- 요약 관련 로직 비활성화 끝 ---
-
-            # 단순한 메시지 포맷으로 변경
             message = f"📢 [{company}]\n📌 {title}\n\n🔗 {url}"
             
             try:
                 await bot.send_message(chat_id=CHAT_ID, text=message)
-                save_sent_article(url, title)
+                # 저장 시 '오늘 날짜'를 세 번째 열에 추가
+                save_sent_article(url, title, today_str)
                 sent_urls.add(url)
                 log("✅ 전송 완료")
             except Exception as e:
