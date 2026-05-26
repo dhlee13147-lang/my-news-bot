@@ -20,7 +20,7 @@ CHAT_ID = os.environ.get('CHAT_ID')
 bot = telegram.Bot(token=TELEGRAM_TOKEN)
 csv_file = 'sent_news.csv'
 
-companies = ["더즌", "dozn", "카카오페이", "오픈에셋", "스위치원"]
+companies = ["더즌", "dozn", "카카오페이", "오픈에셋", "스위치원", "쿠콘", "헥토파이낸셜"]
 exceptionalWords = ['랭키파이', '보호자', '브랜드평판', '브랜드 평판', '트렌드지수', '트렌드 지수', '링크드인']
 
 def load_sent_articles():
